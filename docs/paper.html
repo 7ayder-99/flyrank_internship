@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Refresh or Wait? Leakage-Aware Content Refresh Prioritization — AH</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="paper.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="mark">AH</div>
+  <p class="kicker">FlyRank ML Internship Capstone · Refresh / Content Opportunity Scoring</p>
+  <h1>Refresh or Wait?<br>A Leakage-Aware Look at Content Refresh Prioritization</h1>
+  <p class="byline">Ahmed Hayder</p>
+</header>
+
+<main>
+
+  <section id="abstract">
+    <h2>Abstract</h2>
+    <p>
+      Content teams cannot manually review every page every month, so the question this work
+      asks is: <em>which pages deserve a refresh review first?</em> I built a rule-based baseline
+      from staleness and historical traffic volume, discovered — and corrected — a label-leakage
+      flaw in that baseline, then trained Logistic Regression and Random Forest models on
+      features knowable before the outcome month. After correction, the baseline scored
+      <strong>below random</strong> (0.020 vs. a 0.156 base rate at precision@50), while Random
+      Forest reached <strong>0.700</strong>. The finding is directional and decision-support only:
+      simple recency-and-volume heuristics are not just weak here, they are mildly misleading,
+      and a learned model built on honestly-split, leakage-checked features offers a materially
+      better starting point for prioritization.
+    </p>
+  </section>
+
+  <section id="intro">
+    <h2>Introduction</h2>
+    <p>
+      FlyRank's content teams manage large libraries of SEO content across many clients. Deciding
+      which pages to refresh, protect, or leave alone is currently guided by hand-written rules —
+      thresholds on individual signals like how stale a page is or how much traffic it once had.
+      This work supports one concrete decision: <strong>given a fixed review capacity each month,
+      which pages should be reviewed first?</strong> The goal isn't to prove a causal effect of
+      refreshing content, but to produce a better-than-heuristic ranking that a content team could
+      act on.
+    </p>
+  </section>
+
+  <section id="data">
+    <h2>Data</h2>
+    <p>
+      Data comes from the <strong>FlyRank ML Internship warehouse release</strong> (Hugging Face,
+      gated dataset). Two tables were used: <code>dim_content</code> (static content metadata —
+      creation/update dates, content type, word count, category count, competition, backlinks)
+      and <code>fact_content_daily_performance</code>, aggregated to page-month grain for
+      <strong>February 2026</strong> and <strong>March 2026</strong> — a mid-panel window chosen
+      deliberately over the final month, which the internship treats as a sealed test month.
+    </p>
+    <p><strong>Excluded, on purpose:</strong></p>
+    <ul>
+      <li>Any client- or content-identifying information beyond the provided pseudonymous hash IDs</li>
+      <li>FlyRank's existing product health-score or refresh flags — using them as model inputs
+        would mean learning to reproduce an existing decision, not making a new one</li>
+      <li>The final panel month (sealed test, never touched for label or feature logic)</li>
+      <li>March-month traffic columns as <em>features</em> — March defines the label, so using it
+        as an input would be leakage (see Methodology)</li>
+    </ul>
+  </section>
+
+  <section id="methodology">
+    <h2>Methodology</h2>
+
+    <h3>Label</h3>
+    <p>
+      <code>is_declining</code> — an <strong>observed proxy</strong> I define directly, not a
+      FlyRank-provided outcome: 1 if a page's March impressions are lower than its February
+      impressions, else 0. Base rate in the test set: <strong>15.6%</strong>.
+    </p>
+
+    <h3>Features (February and earlier only)</h3>
+    <p>
+      <code>days_since_update</code>, <code>impressions_feb</code>, <code>avg_position_feb</code>,
+      <code>ctr_feb</code>, plus static <code>dim_content</code> fields (<code>word_count</code>,
+      <code>category_count</code>, <code>competition</code>, <code>backlinks</code>). No March-month
+      traffic figures are used as inputs, since March is where the label comes from.
+    </p>
+
+    <h3>Baseline — and a correction worth naming</h3>
+    <p>
+      The first version of the rule scored pages as <code>stale × visible × declining ×
+      impressions_feb</code> — and scored suspiciously close to perfect. The problem: it
+      multiplied by the very quantity (<code>declining</code>, from March data) that the
+      evaluation label is built from, so it wasn't ranking, it was echoing its own answer. The
+      corrected baseline drops that term: <code>stale × visible × impressions_feb</code>,
+      evaluated against <code>is_declining</code> purely as ground truth, never as an input.
+    </p>
+
+    <h3>Validation design</h3>
+    <p>
+      <strong>Grouped split by client</strong> (<code>GroupShuffleSplit</code>, 80/20,
+      <code>random_state=42</code>) — 40 clients in train, 10 in test, confirmed zero client
+      overlap. A client's pages share systemic factors (industry, overall SEO health), so a
+      random row-level split would leak client identity into the test set.
+    </p>
+  </section>
+
+  <section id="results">
+    <h2>Results</h2>
+    <p>Same test split, same metric (precision@50), computed in the same run:</p>
+
+    <div class="chart-wrap">
+      <svg viewBox="0 0 640 300" class="bar-chart" role="img" aria-label="Bar chart comparing precision at 50 across four methods">
+        <line x1="70" y1="20" x2="70" y2="250" stroke="#D1D5DB" stroke-width="1.5"/>
+        <line x1="70" y1="250" x2="600" y2="250" stroke="#D1D5DB" stroke-width="1.5"/>
+        <!-- gridlines -->
+        <line x1="70" y1="200" x2="600" y2="200" stroke="#F0F0F0" stroke-width="1"/>
+        <line x1="70" y1="150" x2="600" y2="150" stroke="#F0F0F0" stroke-width="1"/>
+        <line x1="70" y1="100" x2="600" y2="100" stroke="#F0F0F0" stroke-width="1"/>
+        <line x1="70" y1="50"  x2="600" y2="50"  stroke="#F0F0F0" stroke-width="1"/>
+        <text x="60" y="254" text-anchor="end" font-size="11" fill="#6B7280">0.0</text>
+        <text x="60" y="204" text-anchor="end" font-size="11" fill="#6B7280">0.2</text>
+        <text x="60" y="154" text-anchor="end" font-size="11" fill="#6B7280">0.4</text>
+        <text x="60" y="104" text-anchor="end" font-size="11" fill="#6B7280">0.6</text>
+        <text x="60" y="54"  text-anchor="end" font-size="11" fill="#6B7280">0.8</text>
+
+        <!-- bars: base 0.156, baseline 0.020, logreg 0.640, rf 0.700 ; scale: 250px = 0.8 -->
+        <rect x="105" y="211" width="70" height="39" fill="#9CA3AF" rx="4"/>
+        <text x="140" y="205" text-anchor="middle" font-size="12" fill="#111827" font-weight="600">0.156</text>
+        <text x="140" y="268" text-anchor="middle" font-size="11" fill="#374151">Base rate</text>
+
+        <rect x="225" y="244" width="70" height="6" fill="#B23A3A" rx="4"/>
+        <text x="260" y="238" text-anchor="middle" font-size="12" fill="#111827" font-weight="600">0.020</text>
+        <text x="260" y="268" text-anchor="middle" font-size="11" fill="#374151">Baseline rule</text>
+
+        <rect x="345" y="50" width="70" height="200" fill="#06B6D4" rx="4"/>
+        <text x="380" y="44" text-anchor="middle" font-size="12" fill="#111827" font-weight="600">0.640</text>
+        <text x="380" y="268" text-anchor="middle" font-size="11" fill="#374151">Logistic Reg.</text>
+
+        <rect x="465" y="25" width="70" height="225" fill="#2563EB" rx="4"/>
+        <text x="500" y="19" text-anchor="middle" font-size="12" fill="#111827" font-weight="600">0.700</text>
+        <text x="500" y="268" text-anchor="middle" font-size="11" fill="#374151">Random Forest</text>
+      </svg>
+    </div>
+
+    <table class="results-table">
+      <thead>
+        <tr><th>Method</th><th>Precision@50</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Base rate (random)</td><td>0.156</td></tr>
+        <tr><td>Baseline rule (corrected)</td><td>0.020</td></tr>
+        <tr><td>Logistic Regression</td><td>0.640</td></tr>
+        <tr><td>Random Forest</td><td><strong>0.700</strong></td></tr>
+      </tbody>
+    </table>
+
+    <h3>Feature importance</h3>
+    <p>
+      Random Forest: <code>impressions_feb</code> (46.3%), <code>avg_position_feb</code> (33.7%),
+      <code>days_since_update</code> (9.4%). No single feature dominates near-100%, and Logistic
+      Regression's coefficients agree on the same ordering — a reassuring cross-check against
+      leakage, and a plausible story: past traffic and rank position carry most of the signal
+      about whether a page is currently declining.
+    </p>
+
+    <h3>Error analysis</h3>
+    <p>
+      Manual review of misclassified pages showed the model mainly fails on borderline cases —
+      pages whose current-month snapshot doesn't clearly signal direction of change, because none
+      of the features capture momentum directly. A page with moderate traffic and position can
+      look stable in a single-month snapshot while already mid-decline.
+    </p>
+  </section>
+
+  <section id="limitations">
+    <h2>Limitations &amp; Honest Framing</h2>
+    <ul>
+      <li>Built on a single month-pair (Feb→Mar 2026), not multiple periods — stability across
+        other month-pairs is untested.</li>
+      <li>No momentum features (e.g., percentage change vs. two months prior) were included yet;
+        error analysis suggests these would help most.</li>
+      <li>All results are <strong>observed and directional</strong>, describing association
+        within this data slice — not a causal claim about what refreshing content does, and not a
+        claim about Google's ranking algorithm.</li>
+      <li>This is <strong>decision-support</strong>, not an autonomous action system: outputs are
+        meant to prioritize human review, not replace it.</li>
+    </ul>
+  </section>
+
+  <section id="recommendations">
+    <h2>Ranked Recommendations</h2>
+    <p>
+      For each review cycle, rank pages by the Random Forest's predicted probability of decline
+      and route the top of that list to <code>review_for_refresh</code>. Two concrete guardrails
+      from this work:
+    </p>
+    <ul>
+      <li>Do not use staleness and past volume alone as a review trigger — this study's corrected
+        baseline shows that heuristic performing worse than random.</li>
+      <li>Treat borderline-probability pages as lower-confidence — the error analysis shows these
+        are exactly where the current feature set is weakest; a temporal-change feature is the
+        highest-value next addition before trusting scores near the decision boundary.</li>
+    </ul>
+  </section>
+
+  <section id="reproducibility">
+    <h2>Reproducibility</h2>
+    <p>All notebooks referenced in this paper are in the repository under <code>work/notebooks/</code>:</p>
+    <ul>
+      <li><code>w02_ml_task_framing.ipynb</code> — task framing</li>
+      <li><code>w03_data_contract.ipynb</code> — data contract and verification queries</li>
+      <li><code>w04_baseline_score.ipynb</code> — baseline rule, signal checks, and the leakage correction</li>
+      <li><code>w05_model.ipynb</code> — model training, validation split, and comparison table</li>
+    </ul>
+  </section>
+
+  <section id="acknowledgments">
+    <h2>Acknowledgments &amp; Data Credit</h2>
+    <p>Built on the FlyRank ML Internship dataset — <a href="https://flyrank.ai" target="_blank" rel="noopener">flyrank.ai</a>.</p>
+  </section>
+
+</main>
+
+
+
+</body>
+</html>
